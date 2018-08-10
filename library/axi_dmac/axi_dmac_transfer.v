@@ -74,6 +74,10 @@ module axi_dmac_transfer #(
   input req_last,
 
   output req_eot,
+  output [DMA_LENGTH_WIDTH-1:0] req_measured_transfer_length,
+  output req_response_partial,
+  output req_response_valid,
+  input req_response_ready,
 
   // Master AXI interface
   input m_dest_axi_aclk,
@@ -172,6 +176,7 @@ wire dma_req_ready;
 wire [DMA_AXI_ADDR_WIDTH-1:BYTES_PER_BEAT_WIDTH_DEST] dma_req_dest_address;
 wire [DMA_AXI_ADDR_WIDTH-1:BYTES_PER_BEAT_WIDTH_SRC] dma_req_src_address;
 wire [DMA_LENGTH_WIDTH-1:0] dma_req_length;
+wire [DMA_LENGTH_WIDTH-1:0] dma_req_measured_transfer_length;
 wire dma_req_eot;
 wire dma_req_sync_transfer_start;
 wire dma_req_last;
@@ -195,6 +200,8 @@ wire src_enabled;
 
 wire req_valid_gated;
 wire req_ready_gated;
+
+wire dma_response_valid;
 
 axi_dmac_reset_manager #(
   .ASYNC_CLK_REQ_SRC (ASYNC_CLK_REQ_SRC),
@@ -266,8 +273,13 @@ dmac_2d_transfer #(
   .out_req_length (dma_req_length),
   .out_req_sync_transfer_start (dma_req_sync_transfer_start),
   .out_req_last (dma_req_last),
-  .out_eot (dma_req_eot)
+  .out_eot (dma_response_valid & dma_req_eot)
 );
+
+// not yet supported
+assign req_measured_transfer_length = 'h0;
+assign req_response_partial = 1'b0;
+assign req_response_valid = req_eot;
 
 end else begin
 
@@ -283,6 +295,9 @@ assign dma_req_last = req_last;
 
 /* Response */
 assign req_eot = dma_req_eot;
+assign req_measured_transfer_length = dma_req_measured_transfer_length;
+assign req_response_partial = dma_response_partial;
+assign req_response_valid = dma_response_valid;
 
 end endgenerate
 
@@ -319,6 +334,10 @@ dmac_request_arb #(
   .req_sync_transfer_start (dma_req_sync_transfer_start),
 
   .eot (dma_req_eot),
+  .measured_transfer_length (dma_req_measured_transfer_length),
+  .response_partial (dma_response_partial),
+  .response_valid (dma_response_valid),
+  .response_ready (req_response_ready),
 
   .req_enable (req_enable),
 

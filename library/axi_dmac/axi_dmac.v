@@ -325,6 +325,10 @@ assign m_src_axi_arid = 'h0;
 assign m_src_axi_arlock = 'h0;
 
 wire up_req_eot;
+wire [DMA_LENGTH_WIDTH-1:0] up_req_measured_transfer_length;
+wire up_response_partial;
+wire up_response_valid;
+wire up_response_ready;
 
 wire ctrl_enable;
 wire ctrl_pause;
@@ -410,6 +414,10 @@ axi_dmac_regmap #(
 
   // DMA response interface
   .response_eot(up_req_eot),
+  .response_measured_transfer_length(up_req_measured_transfer_length),
+  .response_partial(up_response_partial),
+  .response_valid(up_response_valid),
+  .response_ready(up_response_ready),
 
   // Debug interface
   .dbg_dest_addr(m_dest_axi_awaddr),
@@ -459,6 +467,10 @@ axi_dmac_transfer #(
   .req_last(up_dma_req_last),
 
   .req_eot(up_req_eot),
+  .req_measured_transfer_length(up_req_measured_transfer_length),
+  .req_response_partial(up_response_partial),
+  .req_response_valid(up_response_valid),
+  .req_response_ready(up_response_ready),
 
   .m_dest_axi_aclk(m_dest_axi_aclk),
   .m_dest_axi_aresetn(m_dest_axi_aresetn),

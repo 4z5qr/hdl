@@ -65,7 +65,11 @@ module dmac_request_arb #(
   input req_xlast,
   input req_sync_transfer_start,
 
-  output reg eot,
+  output eot,
+  output [DMA_LENGTH_WIDTH-1:0] measured_transfer_length,
+  output response_partial,
+  output response_valid,
+  input response_ready,
 
   // Master AXI interface
   input                               m_dest_axi_aclk,
@@ -198,6 +202,7 @@ localparam BEATS_PER_BURST_WIDTH_DEST = BYTES_PER_BURST_WIDTH - BYTES_PER_BEAT_W
 
 localparam BURSTS_PER_TRANSFER_WIDTH = DMA_LENGTH_WIDTH - BYTES_PER_BURST_WIDTH;
 
+
 reg eot_mem_src[0:2**ID_WIDTH-1];
 reg eot_mem_dest[0:2**ID_WIDTH-1];
 wire request_eot;
@@ -224,9 +229,10 @@ wire dest_req_xlast;
 
 wire dest_response_valid;
 wire dest_response_ready;
-wire dest_response_empty;
 wire [1:0] dest_response_resp;
 wire dest_response_resp_eot;
+wire [BYTES_PER_BURST_WIDTH-1:0] dest_response_data_burst_length;
+wire dest_response_partial;
 
 wire [ID_WIDTH-1:0] dest_request_id;
 wire [ID_WIDTH-1:0] dest_data_request_id;
@@ -265,18 +271,20 @@ wire [ID_WIDTH-1:0] src_response_id;
 wire src_valid;
 wire [DMA_DATA_WIDTH_SRC-1:0] src_data;
 wire src_last;
+wire src_partial_burst;
 wire src_fifo_valid;
 wire [DMA_DATA_WIDTH_SRC-1:0] src_fifo_data;
 wire src_fifo_last;
-
-wire response_dest_valid;
-wire response_dest_ready = 1'b1;
-wire [1:0] response_dest_resp;
-wire response_dest_resp_eot;
+wire src_fifo_partial_burst;
 
 wire                                 src_bl_valid;
 wire                                 src_bl_ready;
 wire [BEATS_PER_BURST_WIDTH_SRC-1:0] src_burst_length;
+
+wire [BYTES_PER_BURST_WIDTH-1:0] dest_burst_info_length;
+wire                             dest_burst_info_partial;
+wire [ID_WIDTH-1:0] dest_burst_info_id;
+wire                dest_burst_info_write;
 
 /* Unused for now
 wire response_src_valid;
@@ -299,14 +307,6 @@ begin
   eot_mem_dest[source_id] <= source_eot;
 end
 
-always @(posedge req_clk)
-begin
-  if (req_resetn == 1'b0) begin
-    eot <= 1'b0;
-  end else begin
-    eot <= response_dest_valid & response_dest_ready & response_dest_resp_eot;
-  end
-end
 
 generate if (DMA_TYPE_DEST == DMA_TYPE_MM_AXI) begin
 
@@ -333,6 +333,8 @@ dmac_dest_mm_axi #(
   .DMA_ADDR_WIDTH(DMA_AXI_ADDR_WIDTH),
   .BEATS_PER_BURST_WIDTH(BEATS_PER_BURST_WIDTH_DEST),
   .BYTES_PER_BEAT_WIDTH(BYTES_PER_BEAT_WIDTH_DEST),
+  .MAX_BYTES_PER_BURST(MAX_BYTES_PER_BURST),
+  .BYTES_PER_BURST_WIDTH(BYTES_PER_BURST_WIDTH),
   .AXI_LENGTH_WIDTH(AXI_LENGTH_WIDTH_DEST)
 ) i_dest_dma_mm (
   .m_axi_aclk(m_dest_axi_aclk),
@@ -353,6 +355,8 @@ dmac_dest_mm_axi #(
   .response_ready(dest_response_ready),
   .response_resp(dest_response_resp),
   .response_resp_eot(dest_response_resp_eot),
+  .response_resp_partial(dest_response_partial),
+  .response_data_burst_length(dest_response_data_burst_length),
 
   .request_id(dest_request_id),
   .response_id(dest_response_id),
@@ -366,6 +370,11 @@ dmac_dest_mm_axi #(
   .fifo_ready(dest_ready),
   .fifo_data(dest_data),
   .fifo_last(dest_last),
+
+  .dest_burst_info_length(dest_burst_info_length),
+  .dest_burst_info_partial(dest_burst_info_partial),
+  .dest_burst_info_id(dest_burst_info_id),
+  .dest_burst_info_write(dest_burst_info_write),
 
   .m_axi_awready(m_axi_awready),
   .m_axi_awvalid(m_axi_awvalid),
@@ -441,6 +450,9 @@ assign m_axi_bready = 1'b0;
 
 assign src_bl_ready = 1'b1;
 
+assign dest_response_partial = 1'b0;
+assign dest_response_data_burst_length = 'h0;
+
 end
 
 if (DMA_TYPE_DEST == DMA_TYPE_STREAM_AXI) begin
@@ -457,6 +469,7 @@ assign dest_data_request_id = dest_request_id;
 
 assign dbg_dest_address_id = 'h00;
 assign dbg_dest_data_id = data_id;
+
 
 dmac_dest_axi_stream #(
   .ID_WIDTH(ID_WIDTH),
@@ -581,6 +594,8 @@ wire src_address_eot = eot_mem_src[src_address_id];
 assign dbg_src_address_id = src_address_id;
 assign dbg_src_data_id = src_data_id;
 
+assign src_partial_burst = 1'b0;
+
 dmac_src_mm_axi #(
   .ID_WIDTH(ID_WIDTH),
   .DMA_DATA_WIDTH(DMA_DATA_WIDTH_SRC),
@@ -697,6 +712,7 @@ dmac_src_axi_stream #(
   .fifo_valid(src_valid),
   .fifo_data(src_data),
   .fifo_last(src_last),
+  .fifo_partial_burst(src_partial_burst),
 
   .s_axis_valid(s_axis_valid),
   .s_axis_ready(s_axis_ready),
@@ -730,6 +746,7 @@ assign dbg_src_data_id = 'h00;
 assign src_response_valid = 1'b0;
 assign src_response_resp = 2'b0;
 */
+assign src_partial_burst = 1'b0;
 
 dmac_src_fifo_inf #(
   .ID_WIDTH(ID_WIDTH),
@@ -828,7 +845,7 @@ sync_bits #(
 );
 
 axi_register_slice #(
-  .DATA_WIDTH(DMA_DATA_WIDTH_SRC + 1),
+  .DATA_WIDTH(DMA_DATA_WIDTH_SRC + 2),
   .FORWARD_REGISTERED(AXI_SLICE_SRC),
   .BACKWARD_REGISTERED(0)
 ) i_src_slice (
@@ -836,10 +853,10 @@ axi_register_slice #(
   .resetn(src_resetn),
   .s_axi_valid(src_valid),
   .s_axi_ready(),
-  .s_axi_data({src_data,src_last}),
+  .s_axi_data({src_data,src_last,src_partial_burst}),
   .m_axi_valid(src_fifo_valid),
   .m_axi_ready(1'b1), /* No backpressure */
-  .m_axi_data({src_fifo_data,src_fifo_last})
+  .m_axi_data({src_fifo_data,src_fifo_last,src_fifo_partial_burst})
 );
 
 axi_dmac_burst_memory #(
@@ -848,6 +865,8 @@ axi_dmac_burst_memory #(
   .ID_WIDTH(ID_WIDTH),
   .MAX_BYTES_PER_BURST(MAX_BYTES_PER_BURST),
   .ASYNC_CLK(ASYNC_CLK_SRC_DEST),
+  .BYTES_PER_BEAT_WIDTH_SRC(BYTES_PER_BEAT_WIDTH_SRC),
+  .BYTES_PER_BURST_WIDTH(BYTES_PER_BURST_WIDTH),
   .ENABLE_DIAGNOSTICS_IF(ENABLE_DIAGNOSTICS_IF)
 ) i_store_and_forward (
   .src_clk(src_clk),
@@ -855,6 +874,8 @@ axi_dmac_burst_memory #(
   .src_data_valid(src_fifo_valid),
   .src_data(src_fifo_data),
   .src_data_last(src_fifo_last),
+  .src_data_valid_bytes({BYTES_PER_BEAT_WIDTH_SRC{1'b1}}),
+  .src_data_partial_burst(src_fifo_partial_burst),
 
   .src_data_request_id(src_data_request_id),
 
@@ -864,6 +885,11 @@ axi_dmac_burst_memory #(
   .dest_data_ready(dest_fifo_ready),
   .dest_data(dest_fifo_data),
   .dest_data_last(dest_fifo_last),
+
+  .dest_burst_info_length(dest_burst_info_length),
+  .dest_burst_info_partial(dest_burst_info_partial),
+  .dest_burst_info_id(dest_burst_info_id),
+  .dest_burst_info_write(dest_burst_info_write),
 
   .dest_request_id(dest_request_id),
   .dest_data_request_id(dest_data_request_id),
@@ -987,28 +1013,6 @@ splitter #(
   })
 );
 
-util_axis_fifo #(
-  .DATA_WIDTH(1),
-  .ADDRESS_WIDTH(0),
-  .ASYNC_CLK(ASYNC_CLK_DEST_REQ)
-) i_dest_response_fifo (
-  .s_axis_aclk(dest_clk),
-  .s_axis_aresetn(dest_resetn),
-  .s_axis_valid(dest_response_valid),
-  .s_axis_ready(dest_response_ready),
-  .s_axis_empty(dest_response_empty),
-  .s_axis_data(dest_response_resp_eot),
-  .s_axis_room(),
-
-  .m_axis_aclk(req_clk),
-  .m_axis_aresetn(req_resetn),
-  .m_axis_valid(response_dest_valid),
-  .m_axis_ready(response_dest_ready),
-  .m_axis_data(response_dest_resp_eot),
-  .m_axis_level()
-);
-
-
 /* Unused for now
 util_axis_fifo #(
   .DATA_WIDTH(2),
@@ -1049,5 +1053,32 @@ dmac_request_generator #(
 
   .eot(request_eot)
 );
+
+axi_dmac_response_manager #(
+  .DMA_DATA_WIDTH_SRC(DMA_DATA_WIDTH_SRC),
+  .DMA_DATA_WIDTH_DEST(DMA_DATA_WIDTH_DEST),
+  .DMA_LENGTH_WIDTH(DMA_LENGTH_WIDTH),
+  .BYTES_PER_BURST_WIDTH(BYTES_PER_BURST_WIDTH),
+  .BYTES_PER_BEAT_WIDTH_SRC(BYTES_PER_BEAT_WIDTH_SRC),
+  .ASYNC_CLK_DEST_REQ(ASYNC_CLK_DEST_REQ)
+) i_response_manager(
+  .dest_clk(dest_clk),
+  .dest_resetn(dest_resetn),
+  .dest_response_valid(dest_response_valid),
+  .dest_response_ready(dest_response_ready),
+  .dest_response_resp(dest_response_resp),
+  .dest_response_partial(dest_response_partial),
+  .dest_response_resp_eot(dest_response_resp_eot),
+  .dest_response_data_burst_length(dest_response_data_burst_length),
+
+  .req_clk(req_clk),
+  .req_resetn(req_resetn),
+  .response_eot(eot),
+  .measured_transfer_length(measured_transfer_length),
+  .response_partial(response_partial),
+  .response_valid(response_valid),
+  .response_ready(response_ready)
+);
+
 
 endmodule

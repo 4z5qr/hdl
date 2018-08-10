@@ -95,6 +95,10 @@ module axi_dmac_regmap #(
 
   // DMA response interface
   input response_eot,
+  input [DMA_LENGTH_WIDTH-1:0] response_measured_transfer_length,
+  input response_partial,
+  input response_valid,
+  output response_ready,
 
   // Debug interface
   input [DMA_AXI_ADDR_WIDTH-1:0] dbg_src_addr,
@@ -224,6 +228,7 @@ axi_dmac_regmap_request #(
   .up_eot(up_eot),
 
   .up_wreq(up_wreq),
+  .up_rreq(up_rreq),
   .up_waddr(up_waddr),
   .up_wdata(up_wdata),
   .up_raddr(up_raddr),
@@ -242,7 +247,11 @@ axi_dmac_regmap_request #(
   .request_sync_transfer_start(request_sync_transfer_start),
   .request_last(request_last),
 
-  .response_eot(response_eot)
+  .response_eot(response_eot),
+  .response_measured_transfer_length(response_measured_transfer_length),
+  .response_partial(response_partial),
+  .response_valid(response_valid),
+  .response_ready(response_ready)
 );
 
 up_axi #(
