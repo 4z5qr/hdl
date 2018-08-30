@@ -250,4 +250,6 @@ assign completion_transfer_id = rew_tranfer_id;
 
 assign rewind_state = (state == STATE_REWIND_ID);
 
+assign abort_req = (state == STATE_REWIND_ID) && !rew_req_xlast && !cur_req_xlast;
+
 endmodule
