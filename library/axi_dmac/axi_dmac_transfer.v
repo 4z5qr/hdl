@@ -202,6 +202,7 @@ wire req_valid_gated;
 wire req_ready_gated;
 
 wire dma_response_valid;
+wire dma_response_partial;
 wire abort_req;
 
 axi_dmac_reset_manager #(
